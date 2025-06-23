@@ -1,6 +1,7 @@
 # BOOK☆WALKER ライトノベル月間ランキング自動クローラー
 
-このリポジトリは、BOOK☆WALKER（https://bookwalker.jp/rank/ct3/）のライトノベル月間ランキングを自動で取得し、ExcelファイルおよびMySQLデータベースに保存するPythonスクリプトを提供します。
+このリポジトリは、BOOK☆WALKER（https://bookwalker.jp/rank/ct3/）
+のライトノベル月間ランキングを自動で取得し、ExcelファイルおよびMySQLデータベースに保存するPythonスクリプトを提供します。
 
 - Seleniumによる自動スクロール＆全件取得
 - APSchedulerによる毎月1日・16日の定時実行
