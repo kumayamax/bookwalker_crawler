@@ -7,6 +7,7 @@ import pandas as pd
 import pymysql
 from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import datetime
+from fastapi import FastAPI, Query
 
 # MySQL設定
 MYSQL_HOST = 'localhost'
@@ -137,4 +138,24 @@ if __name__ == '__main__':
     scheduler.add_job(crawl_bookwalker_with_selenium, 'cron', day=1, hour=2, minute=0)
     scheduler.add_job(crawl_bookwalker_with_selenium, 'cron', day=16, hour=2, minute=0)
     print("スケジューラーが起動しました。毎月1日と16日午前2時に自動でランキングを取得します。Ctrl+Cで終了できます。")
-    scheduler.start() 
+    scheduler.start()
+
+app = FastAPI()
+
+def get_mysql_connection():
+    return pymysql.connect(
+        host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
+        password=MYSQL_PASSWORD, db=MYSQL_DB, charset='utf8mb4'
+    )
+
+@app.get("/rank/")
+def get_rank(period_tag: str = Query(..., description="例: 2024-06-1")):
+    conn = get_mysql_connection()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    cursor.execute(f"SELECT * FROM {MYSQL_TABLE} WHERE period_tag=%s ORDER BY `rank` ASC", (period_tag,))
+    data = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return {"period_tag": period_tag, "data": data}
+
+# 你可以根据需要添加更多API接口 
