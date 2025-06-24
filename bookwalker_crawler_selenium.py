@@ -8,6 +8,8 @@ import pymysql
 from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import datetime
 from fastapi import FastAPI, Query
+import os
+import requests
 
 # MySQL設定
 MYSQL_HOST = 'localhost'
@@ -27,49 +29,50 @@ CREATE TABLE IF NOT EXISTS {MYSQL_TABLE} (
     author VARCHAR(255),
     price VARCHAR(64),
     rating VARCHAR(16),
-    url VARCHAR(512)
+    url VARCHAR(512),
+    period_tag VARCHAR(16),
+    cover_path VARCHAR(512)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 '''
 
 INSERT_SQL = f'''
-INSERT INTO {MYSQL_TABLE} (`rank`, title, author, price, rating, url)
-VALUES (%s, %s, %s, %s, %s, %s)
+INSERT INTO {MYSQL_TABLE} (`rank`, title, author, price, rating, url, period_tag, cover_path)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 '''
+
+def download_cover_image(url, rank, period_tag):
+    if not url or not rank:
+        return ""
+    folder = period_tag  # フォルダ名は期別
+    os.makedirs(folder, exist_ok=True)
+    filename = f"{rank}.jpg"  # 画像名はランキング番号
+    filepath = os.path.join(folder, filename)
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            with open(filepath, "wb") as f:
+                f.write(r.content)
+            return filepath
+    except Exception as e:
+        print(f"カバー画像のダウンロード失敗: {url} エラー: {e}")
+    return ""
 
 def save_to_mysql(books, period_tag):
     conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, charset='utf8mb4')
     cursor = conn.cursor()
-    # データベース作成
     cursor.execute(CREATE_DB_SQL)
     conn.select_db(MYSQL_DB)
-    # テーブル作成（period_tag列を追加）
-    cursor.execute(f'''
-    CREATE TABLE IF NOT EXISTS {MYSQL_TABLE} (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        `rank` INT,
-        title VARCHAR(255),
-        author VARCHAR(255),
-        price VARCHAR(64),
-        rating VARCHAR(16),
-        url VARCHAR(512),
-        period_tag VARCHAR(16)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    # データ挿入
-    data = [(int(b['rank']), b['title'], b['author'], b['price'], b['rating'], b['url'], period_tag) for b in books]
-    # 只清空本期数据
+    cursor.execute(CREATE_TABLE_SQL)
+    data = [(int(b['rank']), b['title'], b['author'], b['price'], b['rating'], b['url'], period_tag, b['cover_path']) for b in books]
     cursor.execute(f"DELETE FROM {MYSQL_TABLE} WHERE period_tag=%s", (period_tag,))
-    cursor.executemany(f'''
-        INSERT INTO {MYSQL_TABLE} (`rank`, title, author, price, rating, url, period_tag)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ''', data)
+    cursor.executemany(INSERT_SQL, data)
     conn.commit()
     cursor.close()
     conn.close()
     print(f"{len(books)}件のデータをMySQLデータベース {MYSQL_DB}.{MYSQL_TABLE}（{period_tag}） に保存しました。")
 
 def crawl_bookwalker_with_selenium():
-    # 取得期别标签（如 2024-06-1 或 2024-06-2）
+    # 期別タグ（上半月: -1, 下半月: -2）
     now = datetime.now()
     if now.day < 16:
         period_tag = f"{now.year}-{now.month:02d}-1"
@@ -77,22 +80,20 @@ def crawl_bookwalker_with_selenium():
         period_tag = f"{now.year}-{now.month:02d}-2"
 
     options = Options()
-    options.add_argument('--headless')  # ヘッドレスモード（画面非表示）
+    options.add_argument('--headless')
     options.add_argument('--disable-gpu')
     driver = webdriver.Chrome(options=options)
     driver.get("https://bookwalker.jp/rank/ct3/")
 
-    # ページを自動で下までスクロールし、全ランキングを読み込む
     last_height = driver.execute_script("return document.body.scrollHeight")
     while True:
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)  # 新しい内容の読み込み待ち
+        time.sleep(2)
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             break
         last_height = new_height
 
-    # ページ解析
     soup = BeautifulSoup(driver.page_source, "lxml")
     books = []
     for card in soup.find_all("div", class_="rankingCard"):
@@ -112,6 +113,11 @@ def crawl_bookwalker_with_selenium():
         price = price_tag.text.strip() if price_tag else ""
         rating_tag = card.find("span", class_="a-rating-starts_text")
         rating = rating_tag.text.strip() if rating_tag else ""
+        imgs = card.find_all("img")
+        cover_url = ""
+        if len(imgs) > 1:
+            cover_url = imgs[1].get('src')
+        cover_path = download_cover_image(cover_url, rank, period_tag)
         if title:
             books.append({
                 "rank": rank,
@@ -119,7 +125,8 @@ def crawl_bookwalker_with_selenium():
                 "author": author,
                 "price": price,
                 "rating": rating,
-                "url": book_url
+                "url": book_url,
+                "cover_path": cover_path
             })
     driver.quit()
     if books:
@@ -157,5 +164,3 @@ def get_rank(period_tag: str = Query(..., description="例: 2024-06-1")):
     cursor.close()
     conn.close()
     return {"period_tag": period_tag, "data": data}
-
-# 你可以根据需要添加更多API接口 
