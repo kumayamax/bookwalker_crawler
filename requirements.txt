@@ -1,0 +1,7 @@
+beautifulsoup4==4.13.4
+fastapi==0.115.13
+lxml==5.4.0
+pandas==2.3.0
+requests==2.32.3
+selenium==4.33.0
+uvicorn==0.34.3
